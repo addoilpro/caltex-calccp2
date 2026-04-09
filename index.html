@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="zh-HK">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>加德士 Caltex 精確成本計算機</title>
+    
+    <!-- PWA / 手機 App 優化標籤 -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="format-detection" content="telephone=no">
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { 
+            background-color: #f7f9fb; 
+            font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+            /* 防止手機端長按彈出菜單與選取文字 */
+            -webkit-touch-callout: none;
+            -webkit-user-select: none;
+            user-select: none;
+        }
+        /* 允許輸入框選取文字 */
+        input { -webkit-user-select: text; user-select: text; }
+
+        .caltex-blue { color: #005696; }
+        .caltex-bg-blue { background-color: #005696; }
+        .caltex-red { color: #ed1c24; }
+        .caltex-bg-red { background-color: #ed1c24; }
+        .brand-line { height: 4px; background: linear-gradient(90deg, #ed1c24 0%, #ed1c24 50%, #005696 50%, #005696 100%); }
+        .card-shadow { box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08); }
+        .day-btn { transition: all 0.2s; }
+        .day-btn.active { border-color: #005696; background-color: #005696; color: white; font-weight: bold; }
+        .fuel-btn.active { border-color: #ed1c24; background-color: #fff; box-shadow: 0 0 0 2px #ed1c24; }
+        .loading-overlay { position: fixed; inset: 0; background: white; display: flex; align-items: center; justify-content: center; z-index: 50; }
+        .result-panel { background-color: #ffffff; border-top: 4px solid #005696; }
+        input::-webkit-outer-spin-button, input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+        
+        /* 針對手機端優化點擊效果 */
+        button:active { opacity: 0.7; }
+    </style>
+</head>
+<body class="p-4 md:p-8">
+
+    <div id="loading" class="loading-overlay">
+        <div class="text-center">
+            <div class="animate-spin rounded-full h-10 w-10 border-b-2 border-red-600 mx-auto mb-4"></div>
+            <p class="text-xs text-gray-500 font-bold tracking-widest uppercase">正在獲取實時數據...</p>
+        </div>
+    </div>
+
+    <div class="max-w-md mx-auto bg-white overflow-hidden card-shadow rounded-lg">
+        <div class="bg-white px-5 py-4 flex justify-between items-center">
+            <div class="flex items-center">
+                <img src="https://www.caltex.com/content/dam/caltex/common/icon/corporate/caltex_logo.png" alt="Caltex" class="h-10 w-auto">
+            </div>
+            <div class="text-[10px] font-bold text-gray-400 uppercase tracking-widest text-right">@Addoilpro<br>Calculator</div>
+        </div>
+        <div class="brand-line w-full"></div>
+
+        <div class="p-6 space-y-6">
+            <div class="text-center">
+                <span id="sync-status" class="text-[9px] bg-gray-100 text-gray-500 px-2 py-1 rounded-full font-mono italic">正在同步數據...</span>
+            </div>
+
+            <!-- 1. 日期選擇 -->
+            <div>
+                <label class="block text-gray-700 font-bold mb-3 text-sm">選擇今日星期</label>
+                <div class="grid grid-cols-7 gap-1" id="day-picker">
+                    <button onclick="updateSelection('day', 1)" class="day-btn py-2 border text-xs text-gray-500 bg-white rounded" data-day="1">一</button>
+                    <button onclick="updateSelection('day', 2)" class="day-btn py-2 border text-xs text-gray-500 bg-white rounded" data-day="2">二</button>
+                    <button onclick="updateSelection('day', 3)" class="day-btn py-2 border text-xs text-gray-500 bg-white rounded" data-day="3">三</button>
+                    <button onclick="updateSelection('day', 4)" class="day-btn py-2 border text-xs text-gray-500 bg-white rounded" data-day="4">四</button>
+                    <button onclick="updateSelection('day', 5)" class="day-btn py-2 border text-xs text-gray-500 bg-white rounded" data-day="5">五</button>
+                    <button onclick="updateSelection('day', 6)" class="day-btn py-2 border text-xs text-gray-500 bg-white rounded" data-day="6">六</button>
+                    <button onclick="updateSelection('day', 7)" class="day-btn py-2 border text-xs text-gray-500 bg-white rounded" data-day="7">日</button>
+                </div>
+            </div>
+
+            <!-- 2. 優惠方案 -->
+            <div>
+                <label class="block text-gray-700 font-bold mb-2 text-sm">選擇優惠方案</label>
+                <div class="relative">
+                    <select id="promo-select" class="w-full p-3 bg-white border border-gray-300 rounded-md outline-none text-sm font-medium text-gray-700 appearance-none focus:border-caltex-blue" onchange="calculate()">
+                        <!-- 動態載入 -->
+                    </select>
+                    <div class="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-gray-400 text-xs">▼</div>
+                </div>
+            </div>
+
+            <!-- 3. 選擇油品 -->
+            <div class="grid grid-cols-2 gap-4">
+                <button onclick="updateSelection('fuel', 'super')" id="btn-super" class="fuel-btn border-2 rounded-md p-3 text-center relative overflow-hidden bg-white border-gray-200">
+                    <div class="font-bold text-sm caltex-blue uppercase">Techron 白金 (Premium)</div>
+                    <div class="text-xs font-bold text-gray-400 mt-1" id="price-super">$0.00</div>
+                    <div id="tag-upgrade" class="hidden absolute top-0 right-0 caltex-bg-red text-white text-[8px] px-2 py-0.5 font-bold">免費升級</div>
+                </button>
+                <button onclick="updateSelection('fuel', 'regular')" id="btn-regular" class="fuel-btn border-2 rounded-md p-3 text-center bg-white border-gray-200">
+                    <div class="font-bold text-sm text-gray-700 uppercase">Techron 黃金 (Regular)</div>
+                    <div class="text-xs font-bold text-gray-400 mt-1" id="price-regular">$0.00</div>
+                </button>
+            </div>
+
+            <!-- 4. 金額輸入 -->
+            <div>
+                <label class="block text-gray-700 font-bold mb-2 text-sm">入油金額 (油錶跳動目標)</label>
+                <div class="relative">
+                    <span class="absolute left-4 top-1/2 -translate-y-1/2 text-xl font-bold text-gray-400">$</span>
+                    <input type="number" id="pay-amount" value="350" class="w-full pl-10 pr-4 py-4 border border-gray-300 rounded-md outline-none focus:border-caltex-blue text-3xl font-bold text-gray-800" oninput="calculate()">
+                </div>
+                <div id="coupon-hint" class="mt-3 flex justify-between items-center bg-gray-50 p-3 rounded-md border border-gray-200">
+                    <span class="text-[11px] text-gray-500">疊加邏輯: 每滿 <span id="hint-min-spend" class="font-bold">$0</span> 送 <span id="hint-disc-lump" class="font-bold">$0</span></span>
+                    <span class="text-[11px] font-black caltex-blue" id="hint-coupon-count">0 張券</span>
+                </div>
+            </div>
+
+            <!-- 結果卡片 -->
+            <div class="result-panel p-6 shadow-inner rounded-b-lg space-y-5 bg-gray-50">
+                <div class="flex justify-between items-end border-b border-gray-200 pb-4">
+                    <div class="text-gray-500 text-[11px] font-bold uppercase tracking-widest">應付現金 (已扣折扣)</div>
+                    <div class="text-4xl font-black caltex-red font-mono" id="res-actual-pay">$0.00</div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <div class="text-gray-400 text-[10px] font-bold mb-1 uppercase">實付淨價 / L</div>
+                        <div class="text-xl font-bold caltex-blue font-mono" id="res-direct">$0.00</div>
+                    </div>
+                    <div class="text-right">
+                        <div class="text-gray-400 text-[10px] font-bold mb-1 uppercase">連積分淨價 / L</div>
+                        <div class="text-xl font-bold text-gray-800 font-mono" id="res-points">$0.00</div>
+                    </div>
+                </div>
+
+                <div class="space-y-2 pt-4 border-t border-dashed border-gray-300">
+                    <div class="flex justify-between text-xs">
+                        <span class="text-gray-500">油錶跳動目標:</span>
+                        <span class="font-bold text-gray-800" id="res-meter">$0.00</span>
+                    </div>
+                    <div class="flex justify-between text-xs">
+                        <span class="text-gray-500 font-semibold">總獲油量 (Total Liters):</span>
+                        <span class="font-black caltex-blue" id="res-total-liters">0.000 L</span>
+                    </div>
+                    <div class="flex justify-between text-[11px] text-gray-500">
+                        <span>實付金額購得 (Paid Liters):</span>
+                        <span class="font-medium" id="res-paid-liters">0.000 L</span>
+                    </div>
+                    <div class="flex justify-between text-[11px] text-gray-400">
+                        <span>贈送油量 (<span id="res-coupon-qty">0</span> 張券):</span>
+                        <span id="res-free-liters">0.000 L</span>
+                    </div>
+                    <div class="flex justify-between text-[11px] text-gray-400">
+                        <span>獲得積分 (連優惠倍數):</span>
+                        <span class="font-medium" id="res-pts">0 pts</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="text-[10px] text-gray-400 text-center leading-relaxed italic" id="res-remarks">
+                正在初始化...
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 數據源 (使用隨機時間戳確保最新)
+        const PRICE_CSV_URL = `https://docs.google.com/spreadsheets/d/e/2PACX-1vTWqLgHf9e8GyoDwCDxY15GY19TvKS0mIo4MXlaYb6pdvJrGm3wxgYsiORXX3vkgWuWjUasZ17X_Cqa/pub?gid=1276961055&single=true&output=csv&t=${Date.now()}`;
+        const PROMO_CSV_URL = `https://docs.google.com/spreadsheets/d/e/2PACX-1vTWqLgHf9e8GyoDwCDxY15GY19TvKS0mIo4MXlaYb6pdvJrGm3wxgYsiORXX3vkgWuWjUasZ17X_Cqa/pub?gid=1529186181&single=true&output=csv&t=${Date.now()}`;
+
+        let promoRules = [];
+        let gasPrices = { "super": 33.99, "regular": 32.19 }; 
+        let state = { day: new Date().getDay() || 7, fuel: 'super' };
+
+        function parseCSV(text) {
+            const rows = [];
+            let row = [];
+            let cell = '';
+            let inQuotes = false;
+            for (let i = 0; i < text.length; i++) {
+                const char = text[i];
+                if (char === '"' && text[i + 1] === '"') { cell += '"'; i++; } 
+                else if (char === '"') { inQuotes = !inQuotes; } 
+                else if (char === ',' && !inQuotes) { row.push(cell.trim()); cell = ''; } 
+                else if ((char === '\r' || char === '\n') && !inQuotes) {
+                    if (cell !== '' || row.length > 0) {
+                        row.push(cell.trim());
+                        rows.push(row);
+                    }
+                    row = []; cell = '';
+                    if (char === '\r' && text[i + 1] === '\n') i++;
+                } else { cell += char; }
+            }
+            if (cell !== '' || row.length > 0) { row.push(cell.trim()); rows.push(row); }
+            return rows;
+        }
+
+        async function init() {
+            try {
+                const [pRes, rRes] = await Promise.all([
+                    fetch(PRICE_CSV_URL).then(res => res.text()),
+                    fetch(PROMO_CSV_URL).then(res => res.text())
+                ]);
+                
+                const pData = parseCSV(pRes);
+                pData.forEach((row, idx) => {
+                    if (idx === 0 || row.length < 3) return;
+                    const product = (row[0] || "").toLowerCase();
+                    const brand = (row[1] || "").toLowerCase();
+                    const priceStr = (row[2] || "").replace(/[^\d.]/g, "");
+                    const price = parseFloat(priceStr);
+
+                    if (brand.includes('caltex') && !isNaN(price)) {
+                        if (product.includes('premium')) gasPrices['super'] = price;
+                        else if (product.includes('standard')) gasPrices['regular'] = price;
+                    }
+                });
+                document.getElementById('sync-status').innerText = `已同步: ${new Date().toLocaleTimeString()}`;
+
+                const rData = parseCSV(rRes);
+                promoRules = rData.slice(1)
+                    .filter(r => r[0] && r[0] !== "")
+                    .map(r => ({
+                        name: r[0],
+                        days: r[2] || "",
+                        targetFuel: (r[3] || "").toLowerCase(),
+                        discLiter: parseFloat(r[4]) || 0,
+                        discLump: parseFloat(r[5]) || 0,
+                        ptsTimes: parseFloat(r[6]) || 0,
+                        upgrade: parseInt(r[7]) || 0,
+                        minSpend: parseFloat(r[8]) || 0,
+                        remarks: r[9] || ""
+                    }));
+
+                updateUI();
+            } catch (e) {
+                console.error("Init Error:", e);
+                document.getElementById('sync-status').innerText = "離線模式/同步失敗";
+                updateUI();
+            } finally {
+                document.getElementById('loading').style.display = 'none';
+            }
+        }
+
+        function updateUI() {
+            document.getElementById('price-super').innerText = `$${gasPrices.super.toFixed(2)}`;
+            document.getElementById('price-regular').innerText = `$${gasPrices.regular.toFixed(2)}`;
+            updateSelection('day', state.day);
+        }
+
+        function updateSelection(type, val) {
+            state[type] = val;
+            if (type === 'day') {
+                document.querySelectorAll('.day-btn').forEach(b => b.classList.toggle('active', parseInt(b.dataset.day) === val));
+                const select = document.getElementById('promo-select');
+                const dayStr = val.toString();
+                const availablePromos = promoRules.filter(r => 
+                    r.days.split(/[,，]/).includes(dayStr) || r.days.includes("每日") || r.days === ""
+                );
+                const uniqueNames = [...new Set(availablePromos.map(r => r.name))];
+                const currentVal = select.value;
+                select.innerHTML = uniqueNames.map(n => `<option value="${n}">${n}</option>`).join('');
+                if (uniqueNames.includes(currentVal)) select.value = currentVal;
+                else if (uniqueNames.length > 0) select.value = uniqueNames[0];
+            }
+            if (type === 'fuel') {
+                document.getElementById('btn-super').classList.toggle('active', val === 'super');
+                document.getElementById('btn-regular').classList.toggle('active', val === 'regular');
+            }
+            calculate();
+        }
+
+        function calculate() {
+            const amount = parseFloat(document.getElementById('pay-amount').value) || 0;
+            const pName = document.getElementById('promo-select').value;
+            if (!pName) return;
+
+            const dayStr = state.day.toString();
+            let rule = promoRules.find(r => 
+                r.name === pName && 
+                (r.days.split(/[,，]/).includes(dayStr) || r.days.includes("每日") || r.days === "") &&
+                (r.targetFuel.includes(state.fuel) || r.targetFuel.includes("全部") || r.targetFuel === "")
+            );
+            if (!rule) rule = promoRules.find(r => r.name === pName);
+            if (!rule) return;
+
+            const couponQty = rule.minSpend > 0 ? Math.floor(amount / rule.minSpend) : 0;
+            const totalFreeVal = couponQty * rule.discLump;
+            const cashPart = amount - totalFreeVal;
+            const listPrice = gasPrices[state.fuel];
+            const isUpgrade = rule.upgrade === 1 && state.fuel === 'super';
+            const basePrice = isUpgrade ? gasPrices.regular : listPrice;
+            
+            document.getElementById('tag-upgrade').classList.toggle('hidden', !isUpgrade);
+
+            const payLiters = cashPart / listPrice;
+            const freeLiters = totalFreeVal / listPrice;
+            const totalLiters = payLiters + freeLiters;
+            const actualPay = payLiters * (basePrice - rule.discLiter);
+
+            const basePtsFactor = state.fuel === 'super' ? 1.0 : 0.5;
+            const pts = payLiters * basePtsFactor * rule.ptsTimes;
+            const ptsEquivalentLiters = (pts * 1) / gasPrices['regular'];
+
+            document.getElementById('hint-min-spend').innerText = `$${rule.minSpend}`;
+            document.getElementById('hint-disc-lump').innerText = `$${rule.discLump}`;
+            document.getElementById('hint-coupon-count').innerText = `${couponQty} 張券`;
+            document.getElementById('res-meter').innerText = `$${amount.toFixed(2)}`;
+            document.getElementById('res-actual-pay').innerText = `$${actualPay.toFixed(2)}`;
+            document.getElementById('res-total-liters').innerText = `${totalLiters.toFixed(3)} L`;
+            document.getElementById('res-paid-liters').innerText = `${payLiters.toFixed(3)} L`;
+            document.getElementById('res-free-liters').innerText = `${freeLiters.toFixed(3)} L`;
+            document.getElementById('res-coupon-qty').innerText = couponQty;
+            
+            const directPrice = totalLiters > 0 ? (actualPay / totalLiters) : 0;
+            document.getElementById('res-direct').innerText = `$${directPrice.toFixed(3)}`;
+            const ptsPrice = (totalLiters + ptsEquivalentLiters) > 0 ? (actualPay / (totalLiters + ptsEquivalentLiters)) : 0;
+            document.getElementById('res-points').innerText = `$${ptsPrice.toFixed(3)}`;
+            document.getElementById('res-pts').innerText = `${pts.toFixed(1)} pts`;
+            document.getElementById('res-remarks').innerText = rule.remarks ? `備註: ${rule.remarks}` : "無備註";
+        }
+
+        window.onload = init;
+    </script>
+</body>
+</html>
